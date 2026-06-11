@@ -1,52 +1,146 @@
 from fastapi import FastAPI
-import pandas as pd
+from pydantic import BaseModel
 import joblib
+import pandas as pd
+import numpy as np
+import os
+
+# ── Load model ────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model = joblib.load(os.path.join(BASE_DIR, '../models/loan_default_model.pkl'))
+categorical_cols = joblib.load(os.path.join(BASE_DIR, '../models/categorical_cols.pkl'))
+numerical_cols = joblib.load(os.path.join(BASE_DIR, '../models/numerical_cols.pkl'))
 
 app = FastAPI(
-    title="Loan Default Risk API",
-    description="Predict Loan Default Probability",
-    version="1.0"
+    title="Loan Default Risk Scoring API",
+    description="Predicts whether a loan applicant will default using LightGBM",
+    version="1.0.0"
 )
 
-# Load trained pipeline
-model = joblib.load("models/loan_default_model.pkl")
+# ── Input schema ──────────────────────────────────────────────
+class LoanInput(BaseModel):
+    NAME_CONTRACT_TYPE: str
+    CODE_GENDER: str
+    FLAG_OWN_CAR: str
+    FLAG_OWN_REALTY: str
+    CNT_CHILDREN: int
+    AMT_INCOME_TOTAL: float
+    AMT_CREDIT: float
+    AMT_ANNUITY: float
+    AMT_GOODS_PRICE: float
+    NAME_TYPE_SUITE: str = "Unaccompanied"
+    NAME_INCOME_TYPE: str
+    NAME_EDUCATION_TYPE: str
+    NAME_FAMILY_STATUS: str
+    NAME_HOUSING_TYPE: str
+    REGION_POPULATION_RELATIVE: float
+    DAYS_REGISTRATION: float
+    OWN_CAR_AGE: float = 0.0
+    FLAG_MOBIL: int = 1
+    FLAG_EMP_PHONE: int
+    FLAG_WORK_PHONE: int
+    FLAG_CONT_MOBILE: int = 1
+    FLAG_PHONE: int
+    FLAG_EMAIL: int
+    OCCUPATION_TYPE: str = "Laborers"
+    CNT_FAM_MEMBERS: float
+    REGION_RATING_CLIENT: int
+    REGION_RATING_CLIENT_W_CITY: int
+    WEEKDAY_APPR_PROCESS_START: str
+    HOUR_APPR_PROCESS_START: int
+    REG_REGION_NOT_LIVE_REGION: int = 0
+    REG_REGION_NOT_WORK_REGION: int = 0
+    LIVE_REGION_NOT_WORK_REGION: int = 0
+    REG_CITY_NOT_LIVE_CITY: int
+    REG_CITY_NOT_WORK_CITY: int
+    LIVE_CITY_NOT_WORK_CITY: int
+    ORGANIZATION_TYPE: str
+    EXT_SOURCE_2: float
+    EXT_SOURCE_3: float
+    DEF_30_CNT_SOCIAL_CIRCLE: float = 0.0
+    DEF_60_CNT_SOCIAL_CIRCLE: float = 0.0
+    DAYS_LAST_PHONE_CHANGE: float
+    FLAG_DOCUMENT_3: int
+    FLAG_DOCUMENT_6: int = 0
+    FLAG_DOCUMENT_8: int = 0
+    FLAG_DOCUMENT_2: int = 0
+    FLAG_DOCUMENT_4: int = 0
+    FLAG_DOCUMENT_5: int = 0
+    FLAG_DOCUMENT_7: int = 0
+    FLAG_DOCUMENT_9: int = 0
+    FLAG_DOCUMENT_10: int = 0
+    FLAG_DOCUMENT_11: int = 0
+    FLAG_DOCUMENT_12: int = 0
+    FLAG_DOCUMENT_13: int = 0
+    FLAG_DOCUMENT_14: int = 0
+    FLAG_DOCUMENT_15: int = 0
+    FLAG_DOCUMENT_16: int = 0
+    FLAG_DOCUMENT_17: int = 0
+    FLAG_DOCUMENT_18: int = 0
+    FLAG_DOCUMENT_19: int = 0
+    FLAG_DOCUMENT_20: int = 0
+    FLAG_DOCUMENT_21: int = 0
+    OBS_30_CNT_SOCIAL_CIRCLE: float = 0.0
+    OBS_60_CNT_SOCIAL_CIRCLE: float = 0.0
+    DAYS_ID_PUBLISH: float = -1000.0
+    AMT_REQ_CREDIT_BUREAU_HOUR: float = 0.0
+    AMT_REQ_CREDIT_BUREAU_DAY: float = 0.0
+    AMT_REQ_CREDIT_BUREAU_WEEK: float = 0.0
+    AMT_REQ_CREDIT_BUREAU_MON: float = 0.0
+    AMT_REQ_CREDIT_BUREAU_QRT: float = 0.0
+    AMT_REQ_CREDIT_BUREAU_YEAR: float = 0.0
+    AGE_YEARS: float
+    YEARS_EMPLOYED: float
+    CREDIT_INCOME_RATIO: float
+    ANNUITY_INCOME_RATIO: float
+    CREDIT_GOODS_RATIO: float
+    INCOME_PER_PERSON: float
 
-
+# ── Endpoints ─────────────────────────────────────────────────
 @app.get("/")
 def home():
     return {
-        "status": "running",
-        "model": "LightGBM Loan Default Predictor"
+        "message": "Loan Default Risk Scoring API is running!",
+        "endpoints": {
+            "predict": "/predict",
+            "health": "/health",
+            "docs": "/docs"
+        }
     }
 
+@app.get("/health")
+def health():
+    return {"status": "healthy", "model": "LightGBM Loan Default Predictor"}
 
 @app.post("/predict")
-def predict(data: dict):
+def predict(loan: LoanInput):
+    # Convert to dataframe
+    input_dict = loan.dict()
+    df = pd.DataFrame([input_dict])
 
-    df = pd.DataFrame([data])
+    # Fix categorical types
+    for col in categorical_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
 
-    probability = float(
-        model.predict_proba(df)[0][1]
-    )
+    # Predict
+    default_probability = model.predict_proba(df)[0][1]
+    prediction = model.predict(df)[0]
 
-    if probability < 0.10:
-        risk_tier = "A"
-        decision = "APPROVE"
-
-    elif probability < 0.25:
-        risk_tier = "B"
-        decision = "APPROVE_WITH_REVIEW"
-
-    elif probability < 0.50:
-        risk_tier = "C"
-        decision = "MANUAL_REVIEW"
-
+    # Risk tier
+    if default_probability >= 0.75:
+        risk_tier = "D — VERY HIGH RISK"
+    elif default_probability >= 0.50:
+        risk_tier = "C — HIGH RISK"
+    elif default_probability >= 0.25:
+        risk_tier = "B — MEDIUM RISK"
     else:
-        risk_tier = "D"
-        decision = "REJECT"
+        risk_tier = "A — LOW RISK"
 
     return {
-        "default_probability": round(probability, 4),
+        "default_predicted": bool(prediction),
+        "default_probability": round(float(default_probability), 3),
         "risk_tier": risk_tier,
-        "decision": decision
+        "message": "🚨 High default risk — review carefully!" if prediction == 1
+                   else "✅ Low default risk — likely to repay"
     }
