@@ -98,6 +98,55 @@ F1 Score      : 0.270
 
 **Note on metrics:** Accuracy is not reported as it is not a meaningful metric for datasets with 92/8 class distributions. ROC-AUC and Recall are the primary evaluation metrics, consistent with industry practice for credit risk modeling.
 
+## Why F1 is 0.270 — The Precision-Recall Tradeoff
+
+F1 of 0.270 reflects a deliberate business tradeoff. At the default threshold (0.5), the model achieves 67% recall with approximately 17% precision. In credit risk modeling, missing a real defaulter is significantly more costly than a false rejection — a bad loan costs the bank the entire principal, while a false rejection costs only one lost customer. Recall is therefore the primary optimization target. This threshold choice is consistent with standard industry practice in credit scoring.
+
+---
+
+## Why ROC-AUC is 0.757 — And How to Push it Higher
+
+This project uses only `application_train.csv`. The full Home Credit dataset includes 6 auxiliary tables — `bureau.csv`, `previous_application.csv`, `installments_payments.csv`, `POS_CASH_balance.csv`, `credit_card_balance.csv` and `bureau_balance.csv`. Top Kaggle solutions achieving ROC-AUC of 0.80+ all join these auxiliary tables to engineer hundreds of additional behavioral and historical features. Incorporating these tables is the most direct path to improving model performance and is documented as the primary next step.
+
+---
+
+## How to Reproduce
+
+1. Download the dataset from Kaggle:
+   https://www.kaggle.com/competitions/home-credit-default-risk/data
+   Place `application_train.csv` in the `data/` folder
+
+2. Install dependencies:
+```bash
+   pip install -r requirements.txt
+```
+
+3. Run notebooks in order:
+   - `notebooks/01_eda.ipynb` — exploratory data analysis
+   - `notebooks/02_modeling.ipynb` — preprocessing, training, SHAP
+
+4. Start the API:
+```bash
+   cd app
+   uvicorn main:app --reload
+```
+
+5. Open Swagger UI at `http://127.0.0.1:8000/docs`
+
+**Note:** `application_train.csv` is 300MB and not included in this repository due to GitHub file size limits. Download directly from Kaggle using the link above.
+
+---
+
+## Known Limitations and Future Improvements
+
+| Limitation | Explanation | Fix |
+|------------|-------------|-----|
+| ROC-AUC 0.757 | Only application_train.csv used | Join all 6 auxiliary tables |
+| F1 0.270 | Precision-recall tradeoff at 0.5 threshold | Tune threshold per business cost matrix |
+| Probability calibration | scale_pos_weight can produce uncalibrated probabilities | Apply CalibratedClassifierCV |
+| GridSearchCV scope | 24 combinations — lightweight tuning | Use Optuna for full Bayesian optimization |
+| Single table features | 75 features from one table | Feature engineering across all 7 tables |
+
 ---
 
 ## API Deployment
