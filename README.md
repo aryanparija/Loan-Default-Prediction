@@ -4,6 +4,8 @@ A production-grade machine learning system for predicting loan default risk, bui
 
 ---
 
+**🔗 Live Demo:** https://loan-default-prediction-aryanparija.streamlit.app/
+
 ## Problem Statement
 
 Credit default is one of the most significant sources of financial loss for banks and non-banking financial companies. Traditional rule-based credit scoring systems fail to capture complex non-linear relationships between applicant attributes and repayment behavior. This project addresses that gap by building an interpretable gradient boosting model that scores loan applications in real time via a REST API.
@@ -201,11 +203,12 @@ uvicorn main:app --reload
 | Imbalance Handling | scale_pos_weight (LightGBM native) |
 | Explainability | SHAP TreeExplainer |
 | API Framework | FastAPI |
+| UI Framework  | Streamlit
 | Server | Uvicorn |
 | Data Processing | Pandas, NumPy |
 | Visualization | Matplotlib, Seaborn |
 | Model Serialization | Joblib |
-
+| Deployment | Streamlit Community Cloud
 ---
 
 ## Project Structure
@@ -214,17 +217,33 @@ loan-default-prediction/
 │   ├── application_train.csv
 │   └── HomeCredit_columns_description.csv
 ├── notebooks/
-│   └── 01_eda.ipynb
+│   ├── 01_eda.ipynb
+│   └── 02_modeling.ipynb
 ├── models/
 │   ├── loan_default_model.pkl
 │   ├── categorical_cols.pkl
 │   └── numerical_cols.pkl
 ├── app/
-│   └── main.py
+│   ├── main.py              ← FastAPI app
+│   └── streamlit_app.py     ← Streamlit UI
 ├── requirements.txt
 └── README.md
 
 ---
+## Streamlit Web Application
+
+A user-friendly interface was built using Streamlit to make the model accessible without requiring API knowledge. Users input applicant details through an interactive form and receive real-time default risk predictions with color-coded risk tiers.
+
+**Live Application:** https://loan-default-prediction-aryanparija.streamlit.app/
+
+### Running Locally
+
+```bash
+cd app
+streamlit run streamlit_app.py
+```
+
+The application will open at `http://localhost:8501`
 
 ## Author
 
