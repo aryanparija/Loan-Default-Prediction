@@ -132,6 +132,36 @@ if st.button("🔍 Predict Default Risk", type="primary", use_container_width=Tr
         'ANNUITY_INCOME_RATIO': amt_annuity / (amt_income_total + 1),
         'CREDIT_GOODS_RATIO': amt_credit / (amt_goods_price + 1),
         'INCOME_PER_PERSON': amt_income_total / (cnt_fam_members + 1),
+            
+        'BUREAU_LOAN_COUNT': 0.0,
+        'BUREAU_ACTIVE_LOANS': 0.0,
+        'BUREAU_CREDIT_TYPES': 0.0,
+        'BUREAU_DAYS_CREDIT_MEAN': None,
+        'BUREAU_DAYS_CREDIT_MIN': None,
+        'BUREAU_MAX_OVERDUE_DAYS': 0.0,
+        'BUREAU_MAX_AMT_OVERDUE': 0.0,
+        'BUREAU_TOTAL_PROLONG': 0.0,
+        'BUREAU_TOTAL_CREDIT_SUM': 0.0,
+        'BUREAU_TOTAL_DEBT': 0.0,
+        'BUREAU_TOTAL_OVERDUE': 0.0,
+        'BUREAU_DEBT_CREDIT_RATIO': 0.0,
+        'NO_BUREAU_HISTORY': 1,
+
+
+        'PREV_APP_COUNT': 0.0,
+        'PREV_APPROVED_COUNT': 0.0,
+        'PREV_REFUSED_COUNT': 0.0,
+        'PREV_CANCELLED_COUNT': 0.0,
+        'PREV_DAYS_DECISION_MEAN': None,
+        'PREV_DAYS_DECISION_MIN': None,
+        'PREV_AMT_APPLICATION_MEAN': None,
+        'PREV_AMT_CREDIT_MEAN': None,
+        'PREV_AMT_ANNUITY_MEAN': None,
+        'PREV_CNT_PAYMENT_MEAN': None,
+        'PREV_RATE_DOWN_PAYMENT_MEAN': None,
+        'PREV_CREDIT_APPLICATION_RATIO': None,
+        'PREV_REFUSAL_RATE': 0.0,
+        'NO_PREV_APPLICATION': 1,
     }
     
     df = pd.DataFrame([input_dict])
