@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import Optional
 import joblib
 import pandas as pd
 import numpy as np
@@ -13,8 +14,8 @@ numerical_cols = joblib.load(os.path.join(BASE_DIR, '../models/numerical_cols.pk
 
 app = FastAPI(
     title="Loan Default Risk Scoring API",
-    description="Predicts whether a loan applicant will default using LightGBM",
-    version="1.0.0"
+    description="Predicts whether a loan applicant will default using LightGBM, enriched with bureau and previous application credit history",
+    version="2.0.0"
 )
 
 # ── Input schema ──────────────────────────────────────────────
@@ -96,11 +97,42 @@ class LoanInput(BaseModel):
     CREDIT_GOODS_RATIO: float
     INCOME_PER_PERSON: float
 
+    # ── Bureau history features — optional, default = no bureau history ──
+    BUREAU_LOAN_COUNT: float = 0.0
+    BUREAU_ACTIVE_LOANS: float = 0.0
+    BUREAU_CREDIT_TYPES: float = 0.0
+    BUREAU_DAYS_CREDIT_MEAN: Optional[float] = None
+    BUREAU_DAYS_CREDIT_MIN: Optional[float] = None
+    BUREAU_MAX_OVERDUE_DAYS: float = 0.0
+    BUREAU_MAX_AMT_OVERDUE: float = 0.0
+    BUREAU_TOTAL_PROLONG: float = 0.0
+    BUREAU_TOTAL_CREDIT_SUM: float = 0.0
+    BUREAU_TOTAL_DEBT: float = 0.0
+    BUREAU_TOTAL_OVERDUE: float = 0.0
+    BUREAU_DEBT_CREDIT_RATIO: float = 0.0
+
+    # ── Previous Home Credit application features — optional, default = no prior application ──
+    PREV_APP_COUNT: float = 0.0
+    PREV_APPROVED_COUNT: float = 0.0
+    PREV_REFUSED_COUNT: float = 0.0
+    PREV_CANCELLED_COUNT: float = 0.0
+    PREV_DAYS_DECISION_MEAN: Optional[float] = None
+    PREV_DAYS_DECISION_MIN: Optional[float] = None
+    PREV_AMT_APPLICATION_MEAN: Optional[float] = None
+    PREV_AMT_CREDIT_MEAN: Optional[float] = None
+    PREV_AMT_ANNUITY_MEAN: Optional[float] = None
+    PREV_CNT_PAYMENT_MEAN: Optional[float] = None
+    PREV_RATE_DOWN_PAYMENT_MEAN: Optional[float] = None
+    PREV_CREDIT_APPLICATION_RATIO: Optional[float] = None
+    PREV_REFUSAL_RATE: float = 0.0
+
+
 # ── Endpoints ─────────────────────────────────────────────────
 @app.get("/")
 def home():
     return {
         "message": "Loan Default Risk Scoring API is running!",
+        "version": "2.0.0 — enriched with bureau and previous application credit history",
         "endpoints": {
             "predict": "/predict",
             "health": "/health",
@@ -110,13 +142,18 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "model": "LightGBM Loan Default Predictor"}
+    return {"status": "healthy", "model": "LightGBM Loan Default Predictor (enriched, ROC-AUC 0.770)"}
 
 @app.post("/predict")
 def predict(loan: LoanInput):
-    # Convert to dataframe
     input_dict = loan.dict()
     df = pd.DataFrame([input_dict])
+
+    # Auto-compute "no history" flags based on whether bureau/previous application
+    # data was actually supplied. If the caller didn't provide real bureau data,
+    # BUREAU_LOAN_COUNT stays at its default of 0, which we interpret as no history.
+    df['NO_BUREAU_HISTORY'] = (df['BUREAU_LOAN_COUNT'] == 0).astype(int)
+    df['NO_PREV_APPLICATION'] = (df['PREV_APP_COUNT'] == 0).astype(int)
 
     # Fix categorical types
     for col in categorical_cols:
@@ -142,5 +179,6 @@ def predict(loan: LoanInput):
         "default_probability": round(float(default_probability), 3),
         "risk_tier": risk_tier,
         "message": "🚨 High default risk — review carefully!" if prediction == 1
-                   else "✅ Low default risk — likely to repay"
+                   else "✅ Low default risk — likely to repay",
+        "note": "Bureau and previous-application fields default to 'no history' unless explicitly provided"
     }
