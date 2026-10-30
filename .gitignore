@@ -5,3 +5,6 @@ __pycache__/
 *.csv
 *.zip
 .env
+
+data/*.pkl
+data/*.parquet

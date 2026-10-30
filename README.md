@@ -1,310 +1,174 @@
-# Loan Default Prediction
+# Loan Default Prediction: Classical ML vs. Deep Tabular Learning on Imbalanced Multi-Relational Data
 
-A production-grade machine learning system for predicting loan default risk, built on 307,511 real-world credit applications from Home Credit, enriched with applicant credit bureau history and prior loan application records. The system outputs a calibrated default probability and risk tier (A/B/C/D) for each applicant, enabling data-driven credit decisions.
+A production-grade machine learning system and empirical benchmark for predicting consumer loan default risk across all **7 relational tables** (**307,511 primary loan applications** linked to **58.4M+ auxiliary behavioral records**) from the [Home Credit Default Risk](https://www.google.com/search?q=https://www.kaggle.com/competitions/home-credit-default-risk) database.
 
----
+The system benchmarks **Gradient-Boosted Decision Trees (LightGBM, CatBoost, XGBoost)** and classical baselines against **modern Deep Tabular Architectures (Tabular ResNet, Multi-Layer Perceptron, FT-Transformer)** under a strictly **leakage-free, tuning-matched protocol**, and serves real-time predictions with **post-hoc probability calibration**, **decision-theoretic cost thresholding**, **TreeSHAP explainability**, and **demographic fairness auditing** via a **FastAPI** backend and **Streamlit** web application.
 
-**🔗 Live Demo:** https://loan-default-prediction-aryanparija.streamlit.app/
+🔗 **Live Demo:** [https://loan-default-prediction-aryanparija.streamlit.app/](https://loan-default-prediction-aryanparija.streamlit.app/)
 
-## Problem Statement
+## Key Highlights & Benchmark Contributions
 
-Credit default is one of the most significant sources of financial loss for banks and non-banking financial companies. Traditional rule-based credit scoring systems fail to capture complex non-linear relationships between applicant attributes and repayment behavior. This project addresses that gap by building an interpretable gradient boosting model that scores loan applications in real time via a REST API and a Streamlit interface.
+1. **Full 7-Table Relational Feature Engineering (147 Raw -> 261 Encoded Features)**:
+   - Aggregates **58.4M+ rows** across external credit bureau histories (`bureau.csv`, `bureau_balance.csv`), prior internal loans (`previous_application.csv`), historical repayment timeliness and delinquency velocity (`installments_payments.csv`), monthly point-of-sale contracts (`POS_CASH_balance.csv`), and revolving credit utilization (`credit_card_balance.csv`).
+   - Progressive ablation quantifies the exact lift across relational stages: **1-Table Baseline (`0.7570` ROC-AUC)** -> **3-Table Untuned (`0.7640`)** -> **3-Table Tuned (`0.7696`)** -> **7-Table Full Benchmark (`0.7876` ROC-AUC, `0.2870` PR-AUC)**.
 
----
+2. **Tuning-Matched & Sample-Matched Cross-Paradigm Benchmark**:
+   - **Tuned LightGBM** achieves the highest standalone test discrimination (**`0.7876` ROC-AUC**, **`0.2837` PR-AUC**, **`0.303` F1**, 5-Fold Stratified CV **`0.7828 ± 0.0020`**), followed by **CatBoost (`0.7834`)** and **XGBoost (`0.7829`)**.
+   - Remarkable finding: A **7-Table Tuned Logistic Regression (`0.7704` ROC-AUC)** outperforms the **3-Table Tuned LightGBM (`0.7696`)**, demonstrating that domain-informed multi-table feature engineering outweighs algorithm complexity.
+   - Among deep tabular models evaluated on an identical sample-matched split, a 3-seed **Tabular ResNet (`0.7799` ROC-AUC)** outperforms a 3-seed **PyTorch MLP (`0.7785`)** and **FT-Transformer (`0.7763`)**, while training 23x–88x slower than LightGBM.
+   - A **Rank-Averaged Hybrid Ensemble (`LightGBM + Tabular ResNet + MLP`)** reaches **`0.7876` ROC-AUC (`95% DeLong CI: [0.7811, 0.7942]`)** and **`0.2870` PR-AUC**, achieving a statistically significant lift over standalone LightGBM on the matched split (**Paired DeLong `z = 2.323, p = 0.0202 < 0.05`**).
 
-## Dataset
+3. **Empirical Proof of the Pre-Split SMOTE Data Leakage Trap**:
+   - Proves experimentally that applying SMOTE *before* `train_test_split` (a common flaw in recent papers claiming >0.97 AUC) fabricates an illusory **`0.9809` ROC-AUC** via synthetic nearest-neighbor leakage across train and test sets, whereas strictly leakage-free in-fold SMOTE drops to **`0.7473`**, underperforming native cost-sensitive loss weighting (`scale_pos_weight = 11`).
 
-| Attribute | Details |
-|-----------|---------|
-| Source | Home Credit Default Risk — Kaggle |
-| Primary table | `application_train.csv` — 307,511 loan applications, 122 raw features |
-| Auxiliary table 1 | `bureau.csv` — 1,716,428 records, 305,811 unique applicants (external credit bureau history) |
-| Auxiliary table 2 | `previous_application.csv` — 1,670,214 records, 338,857 unique applicants (prior Home Credit applications) |
-| Final feature count | 102 (after merging auxiliary tables and dropping high-missing columns) |
-| Target | Binary — 1: defaulted, 0: repaid |
-| Class distribution | 91.93% repaid / 8.07% defaulted |
-| Data type | Real anonymized credit application data |
+4. **156x Reduction in Calibration Error (ECE) & Decision-Theoretic Thresholding**:
+   - Post-hoc **Isotonic Regression calibration** corrects the probability shift induced by `scale_pos_weight = 11` (which inflated mean predicted PD to `0.3630` vs. the true `0.0807` default rate), slashing **Expected Calibration Error (ECE) by 156-fold (`0.2822` -> `0.0018`)** and **Brier Score from `0.1666` to `0.0659`**.
+   - Derives optimal approval thresholds (`t*`) under asymmetric False Negative to False Positive cost ratios: **5:1 (`t* = 0.175`, F1 = `0.338`)**, **10:1 (`t* = 0.080`, Recall = `0.681`)**, and **15:1 (`t* = 0.065`, Recall = `0.791`)**.
 
----
+5. **TreeSHAP Interpretability & Demographic Fairness Audit**:
+   - Audits subgroup discrimination and error parity across `CODE_GENDER` and `AGE_YEARS`, and proves via a **Fairness-Blind Ablation** that completely removing gender and age reduces test ROC-AUC by only **`-0.0035` (`0.7876` -> `0.7841`)**.
 
-## Methodology
+## Multi-Relational Dataset Architecture (All 7 Tables)
 
-### 1. Exploratory Data Analysis
-- Analyzed default rate across demographic and financial dimensions
-- Key finding: Unemployed and maternity leave applicants exhibit 36–40% default rates — significantly above the 8% dataset average
-- Identified 49 columns with >40% missing values, subsequently dropped
-- Confirmed extreme class imbalance requiring specialized handling
+| Table Name | Granularity & Join Key | Raw Records | Engineered Aggregates & Key Signals |
+| :--- | :--- | :--- | :--- |
+| **`application_train.csv`** | 1 row per current loan (`SK_ID_CURR`) | 307,511 × 122 | Demographics, affordability ratios, external bureau consensus (`EXT_SOURCE_MEAN`, `EXT_SOURCE_STD`), social circle DPD |
+| **`bureau.csv`** | 1 row per external CB loan (`SK_ID_CURR`) | 1,716,428 × 17 | Active/total loans, credit type diversity, credit age (`MEAN`/`MIN`), overdue amounts, `BUREAU_DEBT_CREDIT_RATIO` |
+| **`bureau_balance.csv`** | Monthly CB status (`SK_ID_BUREAU` -> `SK_ID_CURR`) | 27,299,925 × 3 | Total tracked months, historical 1–5 DPD month counts, mean/max DPD frequency (`BUREAU_BB_DPD_RATE_MEAN`) |
+| **`previous_application.csv`** | 1 row per prior HC loan (`SK_ID_CURR`) | 1,670,214 × 37 | Prior application/approval/refusal/cancellation counts, decision recency, `PREV_REFUSAL_RATE`, `PREV_CREDIT_APPLICATION_RATIO` |
+| **`installments_payments.csv`** | 1 row per payment (`SK_ID_CURR`) | 13,605,401 × 8 | Days Past Due (`DPD`), Days Before Due (`DBD`), `INSTAL_LATE_RATE`, payment shortfall, 1-year delinquency acceleration (`INSTAL_RECENT_1Y_LATE_RATE`) |
+| **`POS_CASH_balance.csv`** | Monthly POS/cash snapshot (`SK_ID_CURR`) | 10,001,358 × 8 | Active/completed POS contracts (`POS_COMPLETED_RATIO`), mean/max `SK_DPD`, future remaining installments |
+| **`credit_card_balance.csv`** | Monthly revolving CC log (`SK_ID_CURR`) | 3,840,312 × 23 | Revolving limit utilization (`CC_UTILIZATION_MEAN`, `MAX`), missed minimum payment rate (`CC_MIN_PAY_MISSED_RATE`), CC DPD |
 
-### 2. Feature Engineering
-Six domain-driven features were engineered from raw application-level variables:
+- **Target Distribution**: `91.93%` Repaid (`0`) vs. `8.07%` Defaulted (`1`) — an `11.39 : 1` imbalance ratio.
+- **Validation Protocol**: Stratified 80/20 train/test split (`246,008` train / `61,503` test with `4,965` defaulters, `random_state = 42`), plus 5-Fold Stratified Cross-Validation on the training split and a 10% validation slice (`24,601` rows) for neural early stopping.
 
-| Feature | Formula | Rationale |
-|---------|---------|-----------|
-| `AGE_YEARS` | DAYS_BIRTH / -365 | Interpretable age in years |
-| `YEARS_EMPLOYED` | DAYS_EMPLOYED / -365 | Employment stability |
-| `CREDIT_INCOME_RATIO` | AMT_CREDIT / AMT_INCOME_TOTAL | Loan burden relative to income |
-| `ANNUITY_INCOME_RATIO` | AMT_ANNUITY / AMT_INCOME_TOTAL | Monthly repayment burden |
-| `CREDIT_GOODS_RATIO` | AMT_CREDIT / AMT_GOODS_PRICE | Loan-to-value ratio |
-| `INCOME_PER_PERSON` | AMT_INCOME_TOTAL / CNT_FAM_MEMBERS | Effective income per dependent |
+## Experimental Results
 
-### 3. Auxiliary Data Enrichment
+### 1. Progressive Multi-Table Ablation Study (LightGBM on Held-Out Test Set, N = 61,503)
 
-The baseline model used only `application_train.csv`. Two additional Home Credit tables were incorporated to capture credit history the base table doesn't contain:
+| Ablation Stage | Relational Tables Included | Raw / Encoded Features | Test ROC-AUC | Test PR-AUC | Minority F1 (t=0.5) | Incremental Gain |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Stage 1: Baseline** | 1 Table (`application_train` only) | 75 / 190 | `0.7570` | — | `0.270` | Baseline |
+| **Stage 2: 3-Table Untuned** | 3 Tables (`+ bureau, previous_application`) | 102 / 214 | `0.7640` | — | `0.274` | `+0.0070` AUC |
+| **Stage 3: 3-Table Tuned** | 3 Tables + GridSearchCV Tuning | 102 / 214 | `0.7696` | `0.2634` | `0.279` | `+0.0056` AUC |
+| **Stage 4: 7-Table Full Benchmark** | All 7 Tables (`+ BB, Instal, POS, CC, EXT_1`) | **147 / 261** | **`0.7876`** | **`0.2837`** | **`0.303`** | **`+0.0180` AUC** |
 
-**`bureau.csv`** — the applicant's credit history with *other* financial institutions, reported to the credit bureau. One-to-many relative to the main table (average 5.6 records per applicant). Aggregated to one row per applicant via `groupby('SK_ID_CURR')`: loan counts, active loan counts, total debt/credit exposure, days since credit opened, overdue history, and a debt-to-credit ratio.
+### 2. Tuning-Matched Classical & GBDT Benchmark (Full 7-Table Feature Set)
 
-**`previous_application.csv`** — the applicant's own prior loan applications with Home Credit itself. Also one-to-many (average 4.9 records per applicant). Aggregated to: approval/refusal/cancellation counts, historical refusal rate, mean requested vs. approved credit amounts, and days since the last decision.
+| Model Configuration | 5-Fold CV ROC-AUC (Mean ± Std) | 5-Fold 95% CI | Test ROC-AUC | Test PR-AUC | F1 (t=0.5) | Raw Brier Score | Tune + Fit Time |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **LightGBM (Tuned 7-Table)** | **`0.7828 ± 0.0020`** | **`[0.7810, 0.7845]`** | **`0.7876`** | **`0.2837`** | **`0.303`** | `0.1675` | `133.4s` |
+| **CatBoost (Tuned 7-Table)** | — | — | **`0.7834`** | **`0.2791`** | `0.292` | `0.1857` | `339.4s` |
+| **XGBoost (Tuned 7-Table)** | `0.7785 ± 0.0017` | `[0.7770, 0.7799]` | **`0.7829`** | **`0.2774`** | `0.297` | `0.1740` | `117.1s` |
+| **Random Forest (Tuned 7-Table)** | — | — | `0.7704` | `0.2532` | **`0.311`** | **`0.1539`** | `513.3s` |
+| **Logistic Regression (Tuned)** | `0.7672 ± 0.0018` | `[0.7656, 0.7688]` | `0.7704` | `0.2569` | `0.276` | `0.1942` | **`27.8s`** |
 
-**Aggregation and missing-value strategy** — handled column-by-column rather than with a blanket rule:
-- Counts and sums (e.g. `BUREAU_LOAN_COUNT`, `PREV_REFUSED_COUNT`) were zero-filled after merging, since a missing aggregate genuinely means zero occurrences for that applicant
-- Mean/min-based columns (e.g. `BUREAU_DAYS_CREDIT_MEAN`, `PREV_DAYS_DECISION_MEAN`) were left as `NaN` and handled by the pipeline's existing `SimpleImputer(median)`, since zero-filling a "days" column would falsely sit inside the real distribution rather than at a meaningful extreme
-- Two explicit indicator flags, `NO_BUREAU_HISTORY` and `NO_PREV_APPLICATION`, were added to distinguish "no history at all" from any numeric fill — this is itself a real, informative signal rather than an artifact of imputation
+### 3. Sample-Matched GBDT vs. Modern Deep Tabular Learning & Paired DeLong Tests
 
-**Key finding — the two "no history" flags behave in opposite directions**, consistent with known credit risk patterns:
-- `NO_BUREAU_HISTORY` correlates **positively** with default risk — applicants with no external credit history ("thin-file") are statistically harder to assess and riskier
-- `NO_PREV_APPLICATION` correlates **negatively** with default risk — being new to *this specific lender* doesn't carry the same penalty, since a well-established borrower elsewhere may simply never have applied to Home Credit before
+Evaluated on the identical 90% training (`221,407` rows) / 10% early-stopping validation (`24,601` rows) split and scored once on the held-out test set (`61,503` rows):
 
-This distinction was validated visually in `01_eda.ipynb` (refusal-rate default staircase, thin-file vs. first-time-applicant comparison) before being carried into modeling.
+| Rank & Model Architecture | Paradigm | Test ROC-AUC | DeLong 95% CI | Test PR-AUC | Delta vs. 7-Tab LGBM | DeLong z-stat | DeLong p-value | Fit Time |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. Hybrid Blend (LGBM + ResNet + MLP)** | Multi-Paradigm Ensemble | **`0.7876`** | **`[0.7811, 0.7942]`** | **`0.2870`** | **`+0.0015`** | **`+2.323`** | **`0.0202*`** | `889.6s` |
+| **2. Tuned LightGBM (7-Table)** | Leaf-Wise GBDT | **`0.7862`** | `[0.7796, 0.7927]` | **`0.2832`** | `0.0000` | `0.000` | `1.0000` | **`11.9s`** |
+| **3. Tabular ResNet (3-Seed Ensemble)** | Residual Deep Net | **`0.7799`** | `[0.7732, 0.7865]` | `0.2766` | `-0.0063` | `-4.474` | `7.67e-06***` | `597.2s` |
+| **4. PyTorch MLP (3-Seed Ensemble)** | Feed-Forward Deep Net | `0.7785` | `[0.7718, 0.7852]` | `0.2780` | `-0.0077` | `-5.258` | `1.46e-07***` | `280.5s` |
+| **5. FT-Transformer (Attention)** | Self-Attention Tabular Net | `0.7763` | `[0.7696, 0.7830]` | `0.2675` | `-0.0099` | `-6.298` | `3.02e-10***` | `1056.5s` |
 
-### 4. Preprocessing Pipeline
-Built using scikit-learn's `ColumnTransformer`:
-- **Numerical:** `SimpleImputer` (median strategy) → `StandardScaler`
-- **Categorical:** `SimpleImputer` (most frequent) → `OneHotEncoder` (handle_unknown='ignore')
+### 4. Empirical Proof of the Pre-Split SMOTE Resampling Leakage Trap
 
-### 5. Class Imbalance Strategy
-Two approaches were evaluated on the baseline feature set:
+| Imbalance Protocol | Test Set Distribution | Reported Test ROC-AUC | Methodological Verdict |
+| :--- | :--- | :---: | :--- |
+| **1. Pre-Split SMOTE (Flawed — Data Leakage)** | Artificially 50% / 50% Balanced (Leaked) | **`0.9809`** | **Invalid** (Synthetic nearest-neighbor test leakage) |
+| **2. In-Fold SMOTE (Leakage-Free, 30k Sample)** | Natural 91.93% / 8.07% Imbalance | `0.7473` | **Valid** (Synthetic interpolation noise in 261-D space) |
+| **3. Cost-Sensitive Weighting (Full 7-Table)** | Natural 91.93% / 8.07% Imbalance | **`0.7876`** | **Optimal** (Preserves exact feature geometry) |
 
-| Approach | ROC-AUC | Notes |
-|----------|---------|-------|
-| SMOTE oversampling | 0.748 | Adds synthetic noise on large datasets |
-| `scale_pos_weight=11` | 0.757 | Native LightGBM imbalance handling |
+### 5. Post-Hoc Probability Calibration & Decision-Theoretic Cost Thresholds
 
-**Decision:** SMOTE was dropped in favor of `scale_pos_weight`. On datasets of 300K+ rows, gradient boosting's native class weighting consistently outperforms synthetic oversampling. This setting was retained for the enriched model.
+| Calibration / Cost Scenario | Test ROC-AUC | Brier Score (Down) | ECE (Down) | Mean Pred. PD (True = `0.0807`) | Optimal Threshold (t*) | Recall at t* | Precision at t* | F1 at t* |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Uncalibrated LightGBM (`w+ = 11`)** | `0.7862` | `0.1666` | `0.2822` | `0.3630` (Distorted) | `t = 0.500` | `0.677` | `0.189` | `0.303` |
+| **Platt Scaling (Sigmoid Calibrated)** | `0.7862` | `0.0661` | `0.0044` | **`0.0795`** | — | — | — | ECE reduced 64x |
+| **Isotonic Regression Calibrated** | `0.7857` | **`0.0659`** | **`0.0018`** | **`0.0796`** | — | — | — | **ECE reduced 156x** |
+| **Cost Ratio FN:FP = 5:1 (Moderate)** | `0.7857` | `0.0659` | `0.0018` | `0.0796` | **`t* = 0.175`** (Bayes `0.167`) | `0.395` | **`0.295`** | **`0.338`** |
+| **Cost Ratio FN:FP = 10:1 (Standard)** | `0.7857` | `0.0659` | `0.0018` | `0.0796` | **`t* = 0.080`** (Bayes `0.091`) | **`0.681`** | `0.193` | `0.301` |
+| **Cost Ratio FN:FP = 15:1 (Conservative)** | `0.7857` | `0.0659` | `0.0018` | `0.0796` | **`t* = 0.065`** (Bayes `0.062`) | **`0.791`** | `0.159` | `0.264` |
 
-### 6. Model Comparison
+### 6. Demographic Fairness Audit & Protected-Attribute Ablation
 
-Models were first compared on the enriched 102-feature set without tuning, to confirm the auxiliary tables added value before investing in hyperparameter search:
+| Subgroup / Ablation | Test Count (N) | Actual Default Rate | Subgroup ROC-AUC | TPR (Default Recall) | FPR (False Alarm) | Approval Rate (`Pred=0`) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Gender: Female (`F`)** | 40,561 | `6.99%` | `0.7805` | `0.6241` | `0.2069` | `76.39%` |
+| **Gender: Male (`M`)** | 20,940 | `10.17%` | **`0.7884`** | `0.7586` | `0.3284` | `62.79%` |
+| **Age: Young (`< 25 yrs`)** | 2,385 | `11.74%` | `0.7338` | `0.8286` | `0.5021` | `45.95%` |
+| **Age: Prime (`25–50 yrs`)** | 38,253 | `9.04%` | **`0.7901`** | `0.7256` | `0.2867` | `67.36%` |
+| **Age: Senior (`> 50 yrs`)** | 20,865 | `5.88%` | `0.7702` | `0.5249` | `0.1502` | `82.77%` |
+| **Fairness-Blind LightGBM (No Gender/Age)** | 61,503 | `8.07%` | **`0.7841`** (`Delta = -0.0035`) | — | — | Retains **99.56%** of full AUC |
 
-| Model | ROC-AUC (baseline, 75 features) | ROC-AUC (enriched, 102 features) | Change |
-|-------|-------------------------------|-----------------------------------|--------|
-| Logistic Regression | 0.741 | 0.757 | +0.016 |
-| Random Forest | 0.747 | 0.757 | +0.010 |
-| XGBoost | 0.754 | 0.764 | +0.010 |
-| **LightGBM** | **0.757** | **0.764** | +0.007 |
+## Comparison with Published Open-Access Literature (2019–2026)
 
-The improvement was consistent across four structurally different model types (linear, bagged trees, two boosting implementations), which is stronger evidence of a genuine signal than a gain on a single architecture would be.
+| Study & Venue | Tables Used | Best Reported Score | This Work (**0.7876** ROC-AUC / **0.2870** PR-AUC) |
+| :--- | :---: | :--- | :--- |
+| [Ben Ammar \& Rubaidi (2026)](https://www.google.com/search?q=https://www.mdpi.com/2227-7390/14/9/1467), *MDPI Mathematics* | 1 table | GBDT `0.7498` AUC (`0.2118` PR-AUC, `0.254` F1) | **Outperforms by `+0.0378` ROC-AUC, `+0.0752` PR-AUC, and `+0.084` F1** |
+| [Yang \& Vasistha (2026)](https://www.google.com/search?q=https://arxiv.org/html/2601.14633v1), *arXiv (UIUC)* | 6 tables | Standalone LGBM `0.7690`; Hybrid GNN+LGBM `0.7816` (`0.2807` PR-AUC) | **Outperforms both standalone LGBM (`+0.0186`) and Hybrid GNN+LGBM (`+0.0060` AUC, `+0.0063` PR-AUC)** |
+| [Tanna et al. (2026)](https://www.google.com/search?q=https://arxiv.org/html/2505.18635v1), *arXiv (Lexsi Labs)* | 7 tables | Classical RF `0.739`, LGBM `0.713`; TabPFN (50K) `0.7860` (`0.302` F1) | **Outperforms classical baselines by `+0.048+` and edges out TabPFN (`0.7876` vs. `0.7860` AUC, `0.338` vs. `0.302` F1)** |
+| [Hlongwane et al. (2024b)](https://www.google.com/search?q=https://pmc.ncbi.nlm.nih.gov/articles/PMC11318906/), *PLOS ONE* | 7 tables -> 11 vars | XGBoost `0.6977` AUC, LightGBM `0.6965` AUC | **Outperforms by `+0.0900` ROC-AUC** |
+| [Hlongwane et al. (2024a)](https://www.google.com/search?q=https://pmc.ncbi.nlm.nih.gov/articles/PMC11108212/), *PLOS ONE* | 7 tables | LightGBM `0.7936`, XGBoost `0.7892`, CatBoost `0.7890` | Comparable 7-table GBDT ceiling while adding **3 Deep Learning families, PR-AUC, DeLong tests, 156x ECE calibration, and fairness** |
+| [Qiu et al. (2019)](https://www.google.com/search?q=https://www.researchgate.net/publication/338526492_Credit_Risk_Scoring_Analysis_Based_on_Machine_Learning_Models), *IEEE ICISCE* | 3 tables | Original LGBM `0.721`; Expert + Pruning `0.755 / 0.778*` | **Outperforms across LR (`0.7704` vs. `0.711`), RF (`0.7704` vs. `0.684`), and LightGBM (`0.7876` vs. `0.778`)** |
+| [IJERT (2026)](https://www.google.com/search?q=https://www.ijert.org/an-explainable-and-fair-machine-learning-approach-for-credit-default-prediction-ijertv15is100217) | 1 table | Tuned XGBoost `0.7570` AUC | **Outperforms by `+0.0306` ROC-AUC** and resolves MLP minority collapse (`0.7785` MLP AUC) |
 
-### 7. Hyperparameter Tuning
+## Project Structure
 
-GridSearchCV with 3-fold cross-validation was run on LightGBM using the enriched feature set:
-
+```text
+Loan-Default-Prediction/
+├── data/                              # Raw Kaggle CSVs (git-ignored)
+│   ├── application_train.csv
+│   ├── bureau.csv
+│   ├── bureau_balance.csv
+│   ├── previous_application.csv
+│   ├── installments_payments.csv
+│   ├── POS_CASH_balance.csv
+│   └── credit_card_balance.csv
+├── notebooks/
+│   ├── 01_eda.ipynb                   # 1-table, 3-table, and 7-table relational EDA & correlations
+│   ├── 02_modeling.ipynb              # Progressive ablation, equal-budget GBDT tuning, 5-fold CV, SMOTE leakage proof, SHAP & fairness
+│   └── 03_mlp_comparison.ipynb        # PyTorch MLP, Tabular ResNet, FT-Transformer, Rank Blend, DeLong tests, Calibration & Cost curves
+├── models/
+│   ├── loan_default_model.pkl         # Serialized preprocessing + LightGBM pipeline
+│   ├── categorical_cols.pkl
+│   └── numerical_cols.pkl
+├── app/
+│   ├── main.py                        # FastAPI REST backend (raw & calibrated PD + cost-sensitive thresholds)
+│   └── streamlit_app.py               # Interactive Streamlit underwriting UI (with Bureau & Prior History inputs)
+├── requirements.txt
+└── README.md
 ```
-Best configuration:
-  learning_rate : 0.05
-  max_depth     : 8
-  n_estimators  : 200
-  num_leaves    : 31
-```
 
-### 8. Model Explainability — What Actually Mattered
+## How to Reproduce & Run Locally
 
-SHAP `TreeExplainer` was applied to interpret the tuned model's predictions at both global and local levels.
-
-6 of the top 20 features by mean absolute SHAP value are derived from the auxiliary tables: `PREV_CNT_PAYMENT_MEAN`, `PREV_CREDIT_APPLICATION_RATIO`, `BUREAU_DEBT_CREDIT_RATIO`, `BUREAU_TOTAL_CREDIT_SUM`, `PREV_AMT_ANNUITY_MEAN`, and `PREV_REFUSAL_RATE`.
-
-Notably, `BUREAU_DEBT_CREDIT_RATIO` and `BUREAU_TOTAL_CREDIT_SUM` showed near-zero linear correlation with the target during EDA (under 0.002) but rank in the top 10–13 by SHAP importance — confirming that LightGBM captured non-linear relationships in these features that a simple correlation check could not detect. This is the reason feature selection was deferred to post-training SHAP analysis rather than pre-filtering on correlation strength alone.
-
-`EXT_SOURCE_2` and `EXT_SOURCE_3` (external bureau-derived credit scores already present in the base application table) remain the dominant predictors by a wide margin — the auxiliary table features supplement rather than replace this existing signal.
-
----
-
-## Results
-
-```
-Final Model     : LightGBM (GridSearchCV tuned, enriched feature set)
-Features        : 102 (application + bureau + previous_application)
-ROC-AUC         : 0.770
-Default Recall  : 0.67
-F1 Score        : 0.279
-```
-
-| Stage | Features | ROC-AUC | F1 | Default Recall |
-|-------|----------|---------|-----|-----------------|
-| Baseline (application data only) | 75 | 0.757 | 0.270 | 0.67 |
-| **Enriched (+ bureau, + previous_application, tuned)** | **102** | **0.770** | **0.279** | **0.67** |
-
-**Note on metrics:** Accuracy is not reported as it is not a meaningful metric for datasets with 92/8 class distributions. ROC-AUC and Recall are the primary evaluation metrics, consistent with industry practice for credit risk modeling. Recall was deliberately held constant at 0.67 across both stages — the enrichment improved how risk is *ranked* (ROC-AUC), without trading away the recall-first threshold decision described below.
-
----
-
-## Why F1 is 0.279 — The Precision-Recall Tradeoff
-
-F1 of 0.279 reflects a deliberate business tradeoff. At the default threshold (0.5), the model achieves 67% recall with roughly 18% precision. In credit risk modeling, missing a real defaulter is significantly more costly than a false rejection — a bad loan costs the bank the entire principal, while a false rejection costs only one lost customer. Recall is therefore the primary optimization target. This threshold choice is consistent with standard industry practice in credit scoring.
-
----
-
-## Why ROC-AUC is 0.770, Not Higher — Benchmarked Against the Leaderboard
-
-This project incorporates 3 of 7 available Home Credit tables: `application_train.csv`, `bureau.csv`, and `previous_application.csv`. The four tables deliberately excluded — `bureau_balance.csv`, `POS_CASH_balance.csv`, `credit_card_balance.csv`, and `installments_payments.csv` — are time-series tables requiring substantially more complex feature engineering (or recurrent neural networks, as used in several top public solutions) to extract value from.
-
-Public Kaggle solutions for this competition achieve ROC-AUC up to ~0.80 on the private leaderboard (top 0.2%, solo) by incorporating all 7 tables, training GRU networks on the time-series tables, applying genetic feature synthesis, and ensembling multiple models — work spanning months, not a single project iteration.
-
-This project scoped to the two highest-value auxiliary tables to balance signal value against engineering complexity — a deliberate, documented tradeoff rather than an oversight. The resulting **+0.013 ROC-AUC improvement (0.757 → 0.770)** is methodologically sound and consistent in direction across all four models tested, but represents roughly 30% of the ~0.045 gap between this baseline and a top-tier leaderboard solution. Closing the remaining gap is the clearest path forward and is listed under Known Limitations below.
-
----
-
-## How to Reproduce
-
-1. Download the dataset from Kaggle:
-   https://www.kaggle.com/competitions/home-credit-default-risk/data
-   Place `application_train.csv`, `bureau.csv`, and `previous_application.csv` in the `data/` folder
-
-2. Install dependencies:
+1. **Download the 7 CSV tables** from [Kaggle Home Credit Default Risk](https://www.google.com/search?q=https://www.kaggle.com/competitions/home-credit-default-risk/data) into `data/`.
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-
-3. Run notebooks in order:
-   - `notebooks/01_eda.ipynb` — exploratory data analysis, including bureau/previous_application feature EDA
-   - `notebooks/02_modeling.ipynb` — auxiliary table aggregation, preprocessing, training, GridSearchCV, SHAP
-
-4. Start the API:
+3. **Run the experimental notebooks in order**:
+   - `notebooks/01_eda.ipynb`
+   - `notebooks/02_modeling.ipynb`
+   - `notebooks/03_mlp_comparison.ipynb`
+4. **Launch the FastAPI Backend**:
    ```bash
    cd app
    uvicorn main:app --reload
    ```
-
-5. Open Swagger UI at `http://127.0.0.1:8000/docs`
-
-6. Or run the Streamlit interface:
+   Open Swagger UI at `http://127.0.0.1:8000/docs`.
+5. **Launch the Streamlit Web Application**:
    ```bash
    cd app
    streamlit run streamlit_app.py
    ```
 
-**Note:** `application_train.csv`, `bureau.csv`, and `previous_application.csv` are not included in this repository due to GitHub file size limits (300MB+ combined). Download directly from Kaggle using the link above.
+## Authors
 
----
-
-## Known Limitations and Future Improvements
-
-| Limitation | Explanation | Fix |
-|------------|-------------|-----|
-| ROC-AUC 0.770 vs. ~0.80 leaderboard ceiling | Only 3 of 7 Home Credit tables used; 4 time-series tables excluded | Incorporate `bureau_balance.csv`, `POS_CASH_balance.csv`, `credit_card_balance.csv`, `installments_payments.csv`, likely via sequence models or further aggregation |
-| F1 0.279 | Precision-recall tradeoff at 0.5 threshold | Tune threshold per an explicit business cost matrix |
-| Probability calibration | `scale_pos_weight` can produce uncalibrated probabilities | Apply `CalibratedClassifierCV` |
-| GridSearchCV scope | 16 combinations, 3-fold CV — lightweight tuning | Use Optuna or a Bayesian search for a wider, more efficient search |
-| API/UI demo inputs | The deployed API and Streamlit app default all bureau/previous-application fields to "no history" rather than collecting them from the user, since this aggregate data would normally be looked up server-side from internal records rather than typed in by an applicant | Document explicitly (see note below); not a defect, a deliberate UX scoping decision |
-
-**Note on deployment inputs:** the live demo and API expose only the original application-level fields as user inputs. The 27 bureau/previous-application fields the enriched model expects are auto-defaulted to "no history" values (`NO_BUREAU_HISTORY=1`, `NO_PREV_APPLICATION=1`, with counts/sums at 0 and true-missing fields imputed by the pipeline). This mirrors how a real credit system would behave — internal bureau and application history is looked up automatically by applicant ID, never typed in manually — but it does mean demo predictions reflect a "first-time, no external history" applicant profile rather than incorporating real bureau data, even when the underlying model was trained to use it.
-
----
-
-## API Deployment
-
-The trained pipeline is served via a FastAPI REST endpoint. The API accepts a JSON payload of applicant features and returns a default probability with a risk tier classification.
-
-### Running Locally
-
-```bash
-pip install -r requirements.txt
-cd app
-uvicorn main:app --reload
-```
-
-### Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Service status |
-| `/health` | GET | Health check |
-| `/predict` | POST | Score a loan application |
-| `/docs` | GET | Interactive Swagger UI |
-
-### Risk Tier Classification
-
-| Tier | Default Probability | Recommended Action |
-|------|--------------------|--------------------|
-| A | < 0.25 | Approve |
-| B | 0.25 – 0.50 | Review with standard checks |
-| C | 0.50 – 0.75 | Enhanced due diligence required |
-| D | > 0.75 | High likelihood of rejection |
-
-### Sample Response
-
-```json
-{
-  "default_predicted": true,
-  "default_probability": 0.826,
-  "risk_tier": "D — VERY HIGH RISK",
-  "message": "🚨 High default risk — review carefully!",
-  "note": "Bureau and previous-application fields default to 'no history' unless explicitly provided"
-}
-```
-
----
-
-## Streamlit Web Application
-
-A user-friendly interface was built using Streamlit to make the model accessible without requiring API knowledge. Users input applicant details through an interactive form and receive real-time default risk predictions with color-coded risk tiers.
-
-**Live Application:** https://loan-default-prediction-aryanparija.streamlit.app/
-
-### Running Locally
-
-```bash
-cd app
-streamlit run streamlit_app.py
-```
-
-The application will open at `http://localhost:8501`
-
----
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Language | Python 3.12 |
-| ML Framework | LightGBM, Scikit-learn, XGBoost (comparison) |
-| Imbalance Handling | `scale_pos_weight` (LightGBM native) |
-| Explainability | SHAP `TreeExplainer` |
-| API Framework | FastAPI |
-| UI Framework | Streamlit |
-| Server | Uvicorn |
-| Data Processing | Pandas, NumPy |
-| Visualization | Matplotlib, Seaborn |
-| Model Serialization | Joblib |
-| Deployment | Streamlit Community Cloud |
-
----
-
-## Project Structure
-
-```
-loan-default-prediction/
-├── data/
-│   ├── application_train.csv
-│   ├── bureau.csv
-│   ├── previous_application.csv
-│   └── HomeCredit_columns_description.csv
-├── notebooks/
-│   ├── 01_eda.ipynb          ← application + bureau + previous_application EDA
-│   └── 02_modeling.ipynb     ← aggregation, preprocessing, training, GridSearchCV, SHAP
-├── models/
-│   ├── loan_default_model.pkl
-│   ├── categorical_cols.pkl
-│   └── numerical_cols.pkl
-├── app/
-│   ├── main.py               ← FastAPI app
-│   └── streamlit_app.py      ← Streamlit UI
-├── requirements.txt
-└── README.md
-```
-
----
-
-## Author
-
-**Aryan Parija**
-[LinkedIn](https://www.linkedin.com/in/aryanparija2006/) | [GitHub](https://github.com/aryanparija)
+- **Aryan Parija** 
+ [LinkedIn](https://www.google.com/search?q=https://www.linkedin.com/in/aryanparija2006/) | [GitHub](https://github.com/aryanparija)
